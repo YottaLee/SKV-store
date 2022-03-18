@@ -1,0 +1,5 @@
+raftlogs/
+tests/
+*/cover.out
+*.log
+.DS_Store
