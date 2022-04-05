@@ -1,8 +1,6 @@
 package pkg
 
 import (
-	"context"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +15,107 @@ func (n *Node) doLeader() stateFunction {
 	// Hint: perform any initial work, and then consider what a node in the
 	// leader state should do when it receives an incoming message on every
 	// possible channel.
-	return nil
+	if n.GetVotedFor() != n.Self.Id {
+		panic("Leader should voted for itself")
+	}
+
+	n.Leader = n.Self
+
+	n.LeaderMutex.Lock()
+	for _, node := range n.getPeers() {
+		n.nextIndex[node.Id] = n.LastLogIndex() + 1
+		n.matchIndex[node.Id] = uint64(0)
+	}
+	n.matchIndex[n.Self.Id] = n.LastLogIndex()
+
+	leaderEntry := &LogEntry{
+		Index:  n.LastLogIndex() + 1,
+		TermId: n.GetCurrentTerm(),
+		Type:   CommandType_NOOP,
+		Data:   []byte{},
+	}
+	n.StoreLog(leaderEntry)
+	n.LeaderMutex.Unlock()
+
+	fallback := n.sendHeartbeats()
+	if fallback {
+		return n.doFollower
+	}
+
+	heartbeat := time.NewTicker(n.Config.HeartbeatTimeout)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case msg := <-n.appendEntries:
+			// receive append entry in leader state
+			if _, fallback := n.handleAppendEntries(msg); fallback {
+				return n.doFollower
+			}
+		case msg := <-n.requestVote:
+			// receive request vote in leader state
+			if n.handleRequestVote(msg) {
+				return n.doFollower
+			}
+		case msg := <-n.clientRequest:
+			request := msg.request
+			reply := msg.reply
+			cacheId := CreateCacheID(request.ClientId, request.SequenceNum)
+
+			cacheReply, exists := n.GetCachedReply(cacheId)
+			if exists {
+				reply <- *cacheReply
+			} else {
+				n.LeaderMutex.Lock()
+				n.requestsMutex.Lock()
+
+				requestEntry := LogEntry{
+					Index:   n.LastLogIndex() + 1,
+					TermId:  n.GetCurrentTerm(),
+					Type:    CommandType_STATE_MACHINE_COMMAND,
+					Command: request.GetStateMachineCmd(),
+					Data:    request.GetData(),
+					CacheId: cacheId,
+				}
+
+				n.requestsByCacheID[cacheId] = append(n.requestsByCacheID[cacheId], reply)
+
+				n.StoreLog(&requestEntry)
+
+				n.requestsMutex.Unlock()
+				n.LeaderMutex.Unlock()
+
+				fallback := n.sendHeartbeats()
+				if fallback {
+					return n.doFollower
+				}
+			}
+
+		case <-heartbeat.C:
+			fallback := n.sendHeartbeats()
+			if fallback {
+				return n.doFollower
+			}
+
+			//matchIndexes := make([]int, 0)
+			//n.LeaderMutex.Lock()
+			//for _, matchIndex := range n.matchIndex {
+			//	matchIndexes = append(matchIndexes, int(matchIndex))
+			//}
+			//sort.Ints(matchIndexes)
+			//newCommitIndex := matchIndexes[len(matchIndexes)/2]
+			//for i := n.CommitIndex.Load() + 1; i <= uint64(newCommitIndex); i++ {
+			//	n.processLogEntry(i)
+			//}
+			//n.CommitIndex.Store(uint64(newCommitIndex))
+			//n.LeaderMutex.Unlock()
+
+		case shutdown := <-n.gracefulExit:
+			if shutdown {
+				return nil
+			}
+		}
+	}
+
 }
 
 // sendHeartbeats is used by the leader to send out heartbeats to each of
@@ -30,7 +128,210 @@ func (n *Node) doLeader() stateFunction {
 // machine should be given the new log entries via processLogEntry.
 func (n *Node) sendHeartbeats() (fallback bool) {
 	// TODO: Students should implement this method
-	return true, true
+	n.LeaderMutex.Lock()
+	n.nextIndex[n.Self.Id] = n.LastLogIndex() + 1
+	n.matchIndex[n.Self.Id] = n.LastLogIndex()
+	currTerm := n.GetCurrentTerm()
+	n.LeaderMutex.Unlock()
+
+	peersLen := len(n.Peers)
+	doneCh := make(chan bool, peersLen)
+	fallbackCh := make(chan bool, peersLen)
+
+	for _, item := range n.Peers {
+		if item.Id != n.Self.Id {
+			p := item
+			go func() {
+				success := false
+				defer func() {
+					doneCh <- success
+				}()
+
+				for {
+					// sent out everything from nextIndex -> lastLogIndex
+					n.LeaderMutex.Lock()
+					nxtInd := n.nextIndex[p.Id]
+
+					lastInd := n.LastLogIndex()
+					var ensToSend []*LogEntry
+					for i := nxtInd; i <= lastInd; i++ {
+						ensToSend = append(ensToSend, n.GetLog(i))
+					}
+
+					var prevLogTerm uint64
+					if n.GetLog(nxtInd-1) != nil {
+						prevLogTerm = n.GetLog(nxtInd - 1).TermId
+					} else {
+						prevLogTerm = 0
+					}
+					n.LeaderMutex.Unlock()
+
+					req := &AppendEntriesRequest{
+						Term:         currTerm,
+						Leader:       n.Self,
+						PrevLogIndex: nxtInd - 1,
+						PrevLogTerm:  prevLogTerm,
+						Entries:      ensToSend,
+						LeaderCommit: n.CommitIndex.Load(),
+					}
+					reply, err := p.AppendEntriesRPC(n, req)
+
+					if err != nil {
+						if err.Error() != "the network policy has forbid this communication" {
+							n.Out("AppendEntriesRPC to %v failed with %v", p.Id, err)
+						}
+						return
+					}
+
+					success = reply.Success
+					if reply.Term > currTerm {
+						n.Out("falling back due to %v, from request %v", reply, req)
+						n.SetCurrentTerm(reply.Term)
+						n.setVotedFor("")
+						fallbackCh <- true
+						return
+					}
+
+					if reply.Success {
+						n.LeaderMutex.Lock()
+						n.nextIndex[p.Id] = lastInd + 1
+						n.matchIndex[p.Id] = lastInd
+						n.checkForCommit()
+						n.LeaderMutex.Unlock()
+						return
+					} else if nxtInd <= 1 {
+						// can't go back anymore!!
+						n.Error("AppendEntriesRPC to %v failed consistency check at 0", p.Id)
+						return
+					} else {
+						n.LeaderMutex.Lock()
+						n.nextIndex[p.Id] = nxtInd - 1
+						n.LeaderMutex.Unlock()
+					}
+
+				}
+			}()
+		}
+	}
+
+	majority := n.Config.ClusterSize/2 + 1
+	successCnt := 1
+	for i := 1; i < peersLen; i++ {
+		select {
+		case success := <-doneCh:
+			if success {
+				successCnt++
+				if successCnt >= majority {
+					return false
+				}
+			}
+		case fall := <-fallbackCh:
+			if fall {
+				return true
+			}
+		}
+	}
+
+	return false
+
+	//fallbackchan := make(chan bool, n.Config.ClusterSize)
+	//count := 0
+	//for _, node := range n.getPeers() {
+	//	entries := make([]*LogEntry, 0)
+	//	n.LeaderMutex.Lock()
+	//	if n.LastLogIndex() >= n.nextIndex[node.GetAddr()] {
+	//		for i := n.nextIndex[node.GetAddr()]; i <= n.LastLogIndex(); i++ {
+	//			entries = append(entries, n.GetLog(i))
+	//		}
+	//	}
+	//	appendRequest := AppendEntriesRequest{
+	//		Term:         n.GetCurrentTerm(),
+	//		Leader:       n.Self,
+	//		PrevLogIndex: n.nextIndex[node.GetAddr()] - 1,
+	//		PrevLogTerm:  n.GetLog(n.nextIndex[node.GetAddr()] - 1).GetTermId(),
+	//		Entries:      entries,
+	//		LeaderCommit: n.CommitIndex.Load(),
+	//	}
+	//	n.LeaderMutex.Unlock()
+	//
+	//	if node.GetId() != n.Self.GetId() {
+	//		go func(req AppendEntriesRequest, node RemoteNode) {
+	//			reply, err := node.AppendEntriesRPC(n, &req)
+	//			if err != nil {
+	//				fallbackchan <- false
+	//				return
+	//			} else {
+	//				if reply.GetTerm() > n.GetCurrentTerm() {
+	//					n.SetCurrentTerm(reply.GetTerm())
+	//					n.setVotedFor("")
+	//					fallbackchan <- true
+	//				} else {
+	//					if reply.GetSuccess() != true {
+	//						// nextIndex--
+	//						n.LeaderMutex.Lock()
+	//						n.nextIndex[node.GetAddr()]--
+	//						n.LeaderMutex.Unlock()
+	//						fallbackchan <- false
+	//					} else {
+	//						// update nextIndex and matchIndex
+	//						n.LeaderMutex.Lock()
+	//						n.nextIndex[node.GetAddr()] = n.LastLogIndex() + 1
+	//						n.matchIndex[node.GetAddr()] = n.LastLogIndex()
+	//						count++
+	//						n.LeaderMutex.Unlock()
+	//						fallbackchan <- false
+	//					}
+	//				}
+	//			}
+	//		}(appendRequest, *node)
+	//	}
+	//}
+	//
+	//// traverse fallbackchan
+	//for i := 0; i < len(n.getPeers())-1; i++ {
+	//	select {
+	//	case fb := <-fallbackchan:
+	//		if fb {
+	//			return true
+	//		}
+	//	}
+	//}
+	//if count >= n.Config.ClusterSize/2+1 {
+	//	return false
+	//}
+	//return false
+}
+
+func (n *Node) checkForCommit() {
+	majority := n.Config.ClusterSize/2 + 1
+
+	newCommit := n.CommitIndex.Load()
+	for i := n.CommitIndex.Load() + 1; i <= n.LastLogIndex(); i++ {
+		cnt := 0
+		for _, ind := range n.matchIndex {
+			if ind >= i {
+				cnt++
+			}
+
+			if cnt >= majority {
+				newCommit = i
+				break
+			}
+		}
+
+		if newCommit != i {
+			break
+		}
+	}
+
+	if newCommit > n.CommitIndex.Load() && n.GetLog(newCommit).TermId == n.GetCurrentTerm() {
+		n.CommitIndex.Store(newCommit)
+
+		for i := n.LastApplied.Load() + 1; i <= n.CommitIndex.Load(); i++ {
+			n.processLogEntry(i)
+			n.LastApplied.Store(i)
+		}
+	}
 }
 
 // processLogEntry applies a single log entry to the finite state machine. It is
