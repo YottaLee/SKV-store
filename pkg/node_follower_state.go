@@ -13,7 +13,7 @@ func (n *Node) doFollower() stateFunction {
 	// Hint: perform any initial work, and then consider what a node in the
 	// follower state should do when it receives an incoming message on every
 	// possible channel.
-	randomTimeOut := randomTimeout(n.Config.ElectionTimeout)
+	timeout := randomTimeout(n.Config.ElectionTimeout)
 
 	for {
 		select {
@@ -24,7 +24,7 @@ func (n *Node) doFollower() stateFunction {
 		case msg := <-n.appendEntries:
 			reset, _ := n.handleAppendEntries(msg)
 			if reset {
-				randomTimeOut = randomTimeout(n.Config.ElectionTimeout)
+				timeout = randomTimeout(n.Config.ElectionTimeout)
 			}
 		case msg := <-n.requestVote:
 			request := msg.request
@@ -39,7 +39,7 @@ func (n *Node) doFollower() stateFunction {
 				n.SetCurrentTerm(request.Term)
 				n.setVotedFor("")
 			}
-
+			// already vote
 			if n.GetVotedFor() != "" && n.GetVotedFor() != request.GetCandidate().GetId() {
 				msg.reply <- RequestVoteReply{
 					Term:        n.GetCurrentTerm(),
@@ -60,14 +60,13 @@ func (n *Node) doFollower() stateFunction {
 
 			if grantVote {
 				n.setVotedFor(request.Candidate.Id)
-				randomTimeOut = randomTimeout(n.Config.ElectionTimeout)
+				timeout = randomTimeout(n.Config.ElectionTimeout)
 			}
 			msg.reply <- RequestVoteReply{
 				Term:        n.GetCurrentTerm(),
 				VoteGranted: grantVote,
 			}
-		case <-randomTimeOut:
-			n.Leader = nil
+		case <-timeout:
 			return n.doCandidate
 		case msg := <-n.clientRequest:
 			msg.reply <- ClientReply{

@@ -1,9 +1,5 @@
 package pkg
 
-import (
-	"time"
-)
-
 // doCandidate implements the logic for a Raft node in the candidate state.
 func (n *Node) doCandidate() stateFunction {
 	n.Out("Transitioning to CANDIDATE_STATE")
@@ -14,26 +10,23 @@ func (n *Node) doCandidate() stateFunction {
 	// candidate state should do when it receives an incoming message on every
 	// possible channel.
 
-	var nextTimeout <-chan time.Time
 	curTerm := n.GetCurrentTerm() + 1
-	n.setVotedFor("")
 	n.SetCurrentTerm(curTerm)
+	n.setVotedFor(n.Self.Id)
+
 	fallBack, electionResults := n.requestVotes(curTerm)
 
-	nextTimeout = randomTimeout(n.Config.ElectionTimeout)
+	timeout := randomTimeout(n.Config.ElectionTimeout)
 
 	for {
-		n.setVotedFor(n.Self.Id)
 		select {
-		case <-nextTimeout:
-			return n.doCandidate
+		case <-timeout:
+			curTerm := n.GetCurrentTerm() + 1
+			n.setVotedFor(n.Self.Id)
+			n.SetCurrentTerm(curTerm)
 
-			//curTerm := n.GetCurrentTerm() + 1
-			//n.setVotedFor("")
-			//n.SetCurrentTerm(curTerm)
-			//
-			//fallBack, electionResults = n.requestVotes(curTerm)
-			//nextTimeout = nil
+			fallBack, electionResults = n.requestVotes(curTerm)
+			timeout = randomTimeout(n.Config.ElectionTimeout)
 
 		case msg := <-n.appendEntries:
 			if _, fb := n.handleAppendEntries(msg); fb {
@@ -72,7 +65,6 @@ func (n *Node) doCandidate() stateFunction {
 func (n *Node) requestVotes(currTerm uint64) (fallback, electionResult bool) {
 	// TODO: Students should implement this method
 	lastLogIndex := n.LastLogIndex()
-	voteCount := 1
 	majority := (n.Config.ClusterSize / 2) + 1
 	request := RequestVoteRequest{
 		Term:         currTerm,
@@ -80,28 +72,39 @@ func (n *Node) requestVotes(currTerm uint64) (fallback, electionResult bool) {
 		LastLogIndex: lastLogIndex,
 		LastLogTerm:  n.StableStore.GetLog(lastLogIndex).TermId,
 	}
-
+	votesChan := make(chan bool, len(n.Peers))
 	for _, peer := range n.getPeers() {
-		if peer.Id == n.Self.Id {
-			continue
-		}
-		reply, err := peer.RequestVoteRPC(n, &request)
-		if err != nil {
-			continue
-		}
+		go func() {
+			reply, err := peer.RequestVoteRPC(n, &request)
+			if err != nil {
+				votesChan <- false
+				return
+			}
 
-		if reply.Term > currTerm {
-			n.setVotedFor("")
-			n.SetCurrentTerm(reply.Term)
-			fallback = true
-			return
-		}
+			if reply.Term > currTerm {
+				n.setVotedFor("")
+				n.SetCurrentTerm(reply.Term)
+				fallback = true
+			}
 
-		if reply.VoteGranted {
-			voteCount++
+			votesChan <- reply.VoteGranted
+
+		}()
+	}
+	votesCount := 0
+
+	for i := 0; i < len(n.Peers); i++ {
+		res := <-votesChan
+		if res {
+			votesCount++
+			if votesCount >= majority {
+				electionResult = true
+				return
+			}
 		}
 	}
-	electionResult = (voteCount >= majority)
+
+	electionResult = votesCount >= majority
 
 	return
 }
@@ -132,14 +135,21 @@ func (n *Node) handleRequestVote(msg RequestVoteMsg) (fallback bool) {
 		}
 		if requestReply.VoteGranted {
 			n.setVotedFor(request.Candidate.Id)
+			reply <- requestReply
+			return
 		}
 		reply <- requestReply
 		return
 	} else {
-		reply <- RequestVoteReply{
+		request := RequestVoteReply{
 			Term:        n.GetCurrentTerm(),
 			VoteGranted: false,
 		}
+		if request.Term == n.GetCurrentTerm() &&
+			n.GetVotedFor() == msg.request.Candidate.Id {
+			request.VoteGranted = true
+		}
+		reply <- request
 		return false
 	}
 }
