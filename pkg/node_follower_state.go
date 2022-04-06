@@ -28,9 +28,7 @@ func (n *Node) doFollower() stateFunction {
 				timeout = randomTimeout(n.Config.ElectionTimeout)
 			}
 		case msg := <-n.requestVote:
-			if n.handleRequestVote(msg) {
-				timeout = randomTimeout(n.Config.ElectionTimeout)
-			}
+			n.handleRequestVote(msg)
 		case <-timeout:
 			n.setLeader(nil)
 			return n.doCandidate
@@ -43,13 +41,13 @@ func (n *Node) doFollower() stateFunction {
 	}
 }
 
-func (n *Node) handleVoteRequest(msg RequestVoteMsg) (resetTimeout bool) {
+func (n *Node) handleVoteRequest(msg RequestVoteMsg) {
 	request := msg.request
 	reply := msg.reply
 	// If a server receives a request with a stale term number, it rejects the request (&5.1)
 	if n.GetCurrentTerm() > request.GetTerm() {
 		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: false}
-		return false
+		return
 	} else if n.GetCurrentTerm() < request.GetTerm() {
 		n.SetCurrentTerm(request.GetTerm())
 		// If follower and candidate are in different term. Reset the follower's vote for
@@ -60,7 +58,7 @@ func (n *Node) handleVoteRequest(msg RequestVoteMsg) (resetTimeout bool) {
 			Term:        n.GetCurrentTerm(),
 			VoteGranted: false,
 		}
-		return false
+		return
 	}
 
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
@@ -69,10 +67,10 @@ func (n *Node) handleVoteRequest(msg RequestVoteMsg) (resetTimeout bool) {
 		(lastTerm == request.GetLastLogTerm() && n.LastLogIndex() <= request.GetLastLogIndex()) {
 		n.setVotedFor(request.GetCandidate().GetId())
 		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: true}
-		return true
+		return
 	}
 	reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: false}
-	return false
+	return
 }
 
 // handleAppendEntries handles an incoming AppendEntriesMsg. It is called by a
