@@ -79,38 +79,6 @@ func (n *Node) doFollower() stateFunction {
 	}
 }
 
-func (n *Node) handleVoteRequest(msg RequestVoteMsg) {
-	request := msg.request
-	reply := msg.reply
-	// If a server receives a request with a stale term number, it rejects the request (&5.1)
-	if n.GetCurrentTerm() > request.GetTerm() {
-		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: false}
-		return
-	} else if n.GetCurrentTerm() < request.GetTerm() {
-		n.SetCurrentTerm(request.GetTerm())
-		// If follower and candidate are in different term. Reset the follower's vote for
-		n.setVotedFor("")
-	}
-	if n.GetVotedFor() != "" && n.GetVotedFor() != request.GetCandidate().GetId() {
-		msg.reply <- RequestVoteReply{
-			Term:        n.GetCurrentTerm(),
-			VoteGranted: false,
-		}
-		return
-	}
-
-	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-	lastTerm := n.GetLog(n.LastLogIndex()).GetTermId()
-	if lastTerm < request.GetLastLogTerm() ||
-		(lastTerm == request.GetLastLogTerm() && n.LastLogIndex() <= request.GetLastLogIndex()) {
-		n.setVotedFor(request.GetCandidate().GetId())
-		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: true}
-		return
-	}
-	reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: false}
-	return
-}
-
 // handleAppendEntries handles an incoming AppendEntriesMsg. It is called by a
 // node in a follower, candidate, or leader state. It returns two booleans:
 // - resetTimeout is true if the follower node should reset the election timeout
