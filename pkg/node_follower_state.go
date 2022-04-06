@@ -28,7 +28,45 @@ func (n *Node) doFollower() stateFunction {
 				timeout = randomTimeout(n.Config.ElectionTimeout)
 			}
 		case msg := <-n.requestVote:
-			n.handleRequestVote(msg)
+			request := msg.request
+			if request.GetTerm() < n.GetCurrentTerm() {
+				msg.reply <- RequestVoteReply{
+					Term:        n.GetCurrentTerm(),
+					VoteGranted: false,
+				}
+				continue
+			}
+			if request.GetTerm() > n.GetCurrentTerm() {
+				n.SetCurrentTerm(request.Term)
+				n.setVotedFor("")
+			}
+
+			if n.GetVotedFor() != "" && n.GetVotedFor() != request.GetCandidate().GetId() {
+				msg.reply <- RequestVoteReply{
+					Term:        n.GetCurrentTerm(),
+					VoteGranted: false,
+				}
+				continue
+			}
+
+			var grantVote bool
+			localLastLogIndex := n.LastLogIndex()
+			localLastLogTerm := n.GetLog(localLastLogIndex).GetTermId()
+
+			if request.LastLogTerm != localLastLogTerm {
+				grantVote = request.LastLogTerm > localLastLogTerm
+			} else {
+				grantVote = request.LastLogIndex >= localLastLogIndex
+			}
+
+			if grantVote {
+				n.setVotedFor(request.Candidate.Id)
+				timeout = randomTimeout(n.Config.ElectionTimeout)
+			}
+			msg.reply <- RequestVoteReply{
+				Term:        n.GetCurrentTerm(),
+				VoteGranted: grantVote,
+			}
 		case <-timeout:
 			n.setLeader(nil)
 			return n.doCandidate
