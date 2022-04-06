@@ -55,11 +55,18 @@ func (n *Node) handleVoteRequest(msg RequestVoteMsg) (resetTimeout bool) {
 		// If follower and candidate are in different term. Reset the follower's vote for
 		n.setVotedFor("")
 	}
+	if n.GetVotedFor() != "" && n.GetVotedFor() != request.GetCandidate().GetId() {
+		msg.reply <- RequestVoteReply{
+			Term:        n.GetCurrentTerm(),
+			VoteGranted: false,
+		}
+		return false
+	}
+
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 	lastTerm := n.GetLog(n.LastLogIndex()).GetTermId()
-	if (n.GetVotedFor() == "" || n.GetVotedFor() == request.GetCandidate().GetId()) &&
-		(lastTerm < request.GetLastLogTerm() ||
-			(lastTerm == request.GetLastLogTerm() && n.LastLogIndex() <= request.GetLastLogIndex())) {
+	if lastTerm < request.GetLastLogTerm() ||
+		(lastTerm == request.GetLastLogTerm() && n.LastLogIndex() <= request.GetLastLogIndex()) {
 		n.setVotedFor(request.GetCandidate().GetId())
 		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: true}
 		return true
