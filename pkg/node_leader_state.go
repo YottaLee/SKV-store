@@ -37,13 +37,15 @@ func (n *Node) doLeader() stateFunction {
 	n.StoreLog(leaderEntry)
 	n.LeaderMutex.Unlock()
 
-	fallback := n.sendHeartbeats()
-	if fallback {
-		return n.doFollower
-	}
+	fallbackChan := make(chan bool)
+	go func() {
+		fallback := n.sendHeartbeats()
+		if fallback {
+			fallbackChan <- true
+		}
+	}()
 
 	heartbeat := time.NewTicker(n.Config.HeartbeatTimeout)
-	defer heartbeat.Stop()
 	for {
 		select {
 		case msg := <-n.appendEntries:
@@ -90,11 +92,19 @@ func (n *Node) doLeader() stateFunction {
 				}
 			}
 
-		case <-heartbeat.C:
-			fallback := n.sendHeartbeats()
-			if fallback {
+		case fallbackFromHB := <-fallbackChan:
+			if fallbackFromHB {
 				return n.doFollower
 			}
+
+		case <-heartbeat.C:
+			// send heartbeat in go routine
+			go func() {
+				fallback := n.sendHeartbeats()
+				if fallback {
+					fallbackChan <- true
+				}
+			}()
 		case shutdown := <-n.gracefulExit:
 			if shutdown {
 				return nil
