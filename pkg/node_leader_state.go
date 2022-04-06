@@ -95,20 +95,6 @@ func (n *Node) doLeader() stateFunction {
 			if fallback {
 				return n.doFollower
 			}
-
-			//matchIndexes := make([]int, 0)
-			//n.LeaderMutex.Lock()
-			//for _, matchIndex := range n.matchIndex {
-			//	matchIndexes = append(matchIndexes, int(matchIndex))
-			//}
-			//sort.Ints(matchIndexes)
-			//newCommitIndex := matchIndexes[len(matchIndexes)/2]
-			//for i := n.CommitIndex.Load() + 1; i <= uint64(newCommitIndex); i++ {
-			//	n.processLogEntry(i)
-			//}
-			//n.CommitIndex.Store(uint64(newCommitIndex))
-			//n.LeaderMutex.Unlock()
-
 		case shutdown := <-n.gracefulExit:
 			if shutdown {
 				return nil
@@ -233,73 +219,6 @@ func (n *Node) sendHeartbeats() (fallback bool) {
 	}
 
 	return false
-
-	//fallbackchan := make(chan bool, n.Config.ClusterSize)
-	//count := 0
-	//for _, node := range n.getPeers() {
-	//	entries := make([]*LogEntry, 0)
-	//	n.LeaderMutex.Lock()
-	//	if n.LastLogIndex() >= n.nextIndex[node.GetAddr()] {
-	//		for i := n.nextIndex[node.GetAddr()]; i <= n.LastLogIndex(); i++ {
-	//			entries = append(entries, n.GetLog(i))
-	//		}
-	//	}
-	//	appendRequest := AppendEntriesRequest{
-	//		Term:         n.GetCurrentTerm(),
-	//		Leader:       n.Self,
-	//		PrevLogIndex: n.nextIndex[node.GetAddr()] - 1,
-	//		PrevLogTerm:  n.GetLog(n.nextIndex[node.GetAddr()] - 1).GetTermId(),
-	//		Entries:      entries,
-	//		LeaderCommit: n.CommitIndex.Load(),
-	//	}
-	//	n.LeaderMutex.Unlock()
-	//
-	//	if node.GetId() != n.Self.GetId() {
-	//		go func(req AppendEntriesRequest, node RemoteNode) {
-	//			reply, err := node.AppendEntriesRPC(n, &req)
-	//			if err != nil {
-	//				fallbackchan <- false
-	//				return
-	//			} else {
-	//				if reply.GetTerm() > n.GetCurrentTerm() {
-	//					n.SetCurrentTerm(reply.GetTerm())
-	//					n.setVotedFor("")
-	//					fallbackchan <- true
-	//				} else {
-	//					if reply.GetSuccess() != true {
-	//						// nextIndex--
-	//						n.LeaderMutex.Lock()
-	//						n.nextIndex[node.GetAddr()]--
-	//						n.LeaderMutex.Unlock()
-	//						fallbackchan <- false
-	//					} else {
-	//						// update nextIndex and matchIndex
-	//						n.LeaderMutex.Lock()
-	//						n.nextIndex[node.GetAddr()] = n.LastLogIndex() + 1
-	//						n.matchIndex[node.GetAddr()] = n.LastLogIndex()
-	//						count++
-	//						n.LeaderMutex.Unlock()
-	//						fallbackchan <- false
-	//					}
-	//				}
-	//			}
-	//		}(appendRequest, *node)
-	//	}
-	//}
-	//
-	//// traverse fallbackchan
-	//for i := 0; i < len(n.getPeers())-1; i++ {
-	//	select {
-	//	case fb := <-fallbackchan:
-	//		if fb {
-	//			return true
-	//		}
-	//	}
-	//}
-	//if count >= n.Config.ClusterSize/2+1 {
-	//	return false
-	//}
-	//return false
 }
 
 func (n *Node) checkForCommit() {
