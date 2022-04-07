@@ -13,21 +13,24 @@ func (n *Node) doCandidate() stateFunction {
 	curTerm := n.GetCurrentTerm() + 1
 	n.SetCurrentTerm(curTerm)
 	n.setVotedFor(n.Self.Id)
+	fallbackChan := make(chan bool)
+	electionChan := make(chan bool)
+	go func() {
+		fallBack, electionResults := n.requestVotes(curTerm)
+		if fallBack {
+			fallbackChan <- true
+		}
 
-	fallBack, electionResults := n.requestVotes(curTerm)
-
+		if electionResults {
+			electionChan <- true
+		}
+	}()
 	timeout := randomTimeout(n.Config.ElectionTimeout)
 
 	for {
 		select {
 		case <-timeout:
-			curTerm := n.GetCurrentTerm() + 1
-			n.setVotedFor(n.Self.Id)
-			n.SetCurrentTerm(curTerm)
-
-			fallBack, electionResults = n.requestVotes(curTerm)
-			timeout = randomTimeout(n.Config.ElectionTimeout)
-
+			return n.doCandidate
 		case msg := <-n.appendEntries:
 			if _, fb := n.handleAppendEntries(msg); fb {
 				return n.doFollower
@@ -47,12 +50,12 @@ func (n *Node) doCandidate() stateFunction {
 			if exit {
 				return nil
 			}
-		default:
-
-			if fallBack {
+		case fallback := <-fallbackChan:
+			if fallback {
 				return n.doFollower
 			}
-			if electionResults {
+		case election := <-electionChan:
+			if election {
 				return n.doLeader
 			}
 		}
