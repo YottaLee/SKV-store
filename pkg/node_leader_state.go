@@ -61,34 +61,65 @@ func (n *Node) doLeader() stateFunction {
 		case msg := <-n.clientRequest:
 			request := msg.request
 			reply := msg.reply
-			cacheId := CreateCacheID(request.ClientId, request.SequenceNum)
-
-			cacheReply, exists := n.GetCachedReply(cacheId)
-			if exists {
-				reply <- *cacheReply
-			} else {
+			if request.SequenceNum == 0 {
+				// TODO registerRequest
 				n.LeaderMutex.Lock()
-				n.requestsMutex.Lock()
-
-				requestEntry := LogEntry{
-					Index:   n.LastLogIndex() + 1,
-					TermId:  n.GetCurrentTerm(),
-					Type:    CommandType_STATE_MACHINE_COMMAND,
-					Command: request.GetStateMachineCmd(),
-					Data:    request.GetData(),
-					CacheId: cacheId,
+				logEntry := &LogEntry{
+					Index:  n.LastLogIndex() + 1,
+					TermId: n.GetCurrentTerm(),
+					Type:   CommandType_CLIENT_REGISTRATION,
 				}
-
-				n.requestsByCacheID[cacheId] = append(n.requestsByCacheID[cacheId], reply)
-
-				n.StoreLog(&requestEntry)
-
-				n.requestsMutex.Unlock()
+				n.StoreLog(logEntry)
 				n.LeaderMutex.Unlock()
-
 				fallback := n.sendHeartbeats()
+				var registerReply ClientReply
 				if fallback {
-					return n.doFollower
+					registerReply = ClientReply{
+						Status:     ClientStatus_NOT_LEADER,
+						ClientId:   0,
+						LeaderHint: n.Self,
+					}
+				} else {
+					registerReply = ClientReply{
+						Status:     ClientStatus_OK,
+						ClientId:   logEntry.Index,
+						LeaderHint: n.Self,
+					}
+				}
+				reply <- registerReply
+				if fallback {
+					fallbackChan <- true
+				}
+			} else {
+				cacheId := CreateCacheID(request.ClientId, request.SequenceNum)
+
+				cacheReply, exists := n.GetCachedReply(cacheId)
+				if exists {
+					reply <- *cacheReply
+				} else {
+					n.LeaderMutex.Lock()
+					n.requestsMutex.Lock()
+
+					requestEntry := LogEntry{
+						Index:   n.LastLogIndex() + 1,
+						TermId:  n.GetCurrentTerm(),
+						Type:    CommandType_STATE_MACHINE_COMMAND,
+						Command: request.GetStateMachineCmd(),
+						Data:    request.GetData(),
+						CacheId: cacheId,
+					}
+
+					n.requestsByCacheID[cacheId] = append(n.requestsByCacheID[cacheId], reply)
+
+					n.StoreLog(&requestEntry)
+
+					n.requestsMutex.Unlock()
+					n.LeaderMutex.Unlock()
+
+					fallback := n.sendHeartbeats()
+					if fallback {
+						return n.doFollower
+					}
 				}
 			}
 
