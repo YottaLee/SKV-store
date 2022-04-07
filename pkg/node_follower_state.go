@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -101,43 +100,53 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		n.SetCurrentTerm(request.GetTerm())
 		n.setVotedFor("")
 	}
+
 	resetTimeout = true
-	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-	if request.PrevLogIndex > 0 && (n.GetLog(request.PrevLogIndex) == nil || n.GetLog(request.PrevLogIndex).GetTermId() != request.GetPrevLogTerm()) {
-		reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: false}
-		return true, true
-	}
-	// Found a log entry whose term and index are matched with prevLogIndex and preLogTerm
-	n.LeaderMutex.Lock()
-	if len(request.Entries) > 0 {
-		newFirstEntry := request.Entries[0]
-		ourLastEntry := n.GetLog(n.LastLogIndex())
-		if (ourLastEntry.Index >= newFirstEntry.Index) ||
-			((ourLastEntry.Index == newFirstEntry.Index) && (ourLastEntry.TermId != newFirstEntry.TermId)) {
-			n.TruncateLog(newFirstEntry.GetIndex())
+	if request.PrevLogIndex > n.LastLogIndex() {
+		reply <- AppendEntriesReply{
+			Term:    n.GetCurrentTerm(),
+			Success: false,
+		}
+	} else if entry := n.GetLog(request.PrevLogIndex); entry != nil && (entry.TermId != request.PrevLogTerm) {
+		reply <- AppendEntriesReply{
+			Term:    n.GetCurrentTerm(),
+			Success: false,
+		}
+	} else {
+		n.LeaderMutex.Lock()
+
+		if len(request.Entries) > 0 {
+			firstEntry := request.Entries[0]
+			curLastEntry := n.GetLog(n.LastLogIndex())
+			if (curLastEntry.Index >= firstEntry.Index) ||
+				((curLastEntry.Index == firstEntry.Index) && (curLastEntry.TermId != firstEntry.TermId)) {
+				n.TruncateLog(firstEntry.Index)
+			}
+
+			if n.LastLogIndex()+1 != firstEntry.GetIndex() {
+				panic("error in appending log entry")
+			}
+
+			for _, entry := range request.Entries {
+				n.StoreLog(entry)
+			}
+		}
+		n.LeaderMutex.Unlock()
+
+		if request.LeaderCommit > n.CommitIndex.Load() {
+			newCommitIndex := uint64(math.Min(float64(request.LeaderCommit), float64(n.LastLogIndex())))
+			for newCommitIndex > n.LastApplied.Load() {
+				n.LastApplied.Add(1)
+				n.processLogEntry(n.LastApplied.Load())
+			}
+			n.CommitIndex.Store(newCommitIndex)
 		}
 
-		if n.LastLogIndex()+1 != newFirstEntry.GetIndex() {
-			panic("truncation not work")
-		}
-
-		for _, entry := range request.Entries {
-			n.StoreLog(entry)
+		reply <- AppendEntriesReply{
+			Term:    n.GetCurrentTerm(),
+			Success: true,
 		}
 	}
-	n.LeaderMutex.Unlock()
 
-	if request.GetLeaderCommit() > n.CommitIndex.Load() {
-		newCommitIndex := uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex())))
-		n.Out("Updating commitIndex from %v -> %v", n.CommitIndex.Load(), uint64(newCommitIndex))
-		for newCommitIndex > n.LastApplied.Load() {
-			n.LastApplied.Add(1)
-			n.processLogEntry(n.LastApplied.Load())
-		}
-		n.CommitIndex.Store(newCommitIndex)
-		n.Out("commitIndex %v --- lastapplied %v", n.CommitIndex.Load(), n.LastApplied.Load())
-		fmt.Printf("commitIndex %v --- lastapplied %v", n.CommitIndex.Load(), n.LastApplied.Load())
-	}
-	reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: true}
-	return true, true
+	return
 }
