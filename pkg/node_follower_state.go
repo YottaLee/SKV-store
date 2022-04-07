@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -127,35 +128,16 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	n.LeaderMutex.Unlock()
 
 	if request.GetLeaderCommit() > n.CommitIndex.Load() {
-		n.CommitIndex.Store(uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex()))))
-		for n.CommitIndex.Load() > n.LastApplied.Load() {
+		newCommitIndex := uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex())))
+		n.Out("Updating commitIndex from %v -> %v", n.CommitIndex.Load(), uint64(newCommitIndex))
+		for newCommitIndex > n.LastApplied.Load() {
 			n.LastApplied.Add(1)
 			n.processLogEntry(n.LastApplied.Load())
 		}
+		n.CommitIndex.Store(newCommitIndex)
+		n.Out("commitIndex %v --- lastapplied %v", n.CommitIndex.Load(), n.LastApplied.Load())
+		fmt.Printf("commitIndex %v --- lastapplied %v", n.CommitIndex.Load(), n.LastApplied.Load())
 	}
 	reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: true}
 	return true, true
-	//n.LeaderMutex.Lock()
-	//for _, leaderLog := range request.GetEntries() {
-	//
-	//	if leaderLog.GetIndex() > n.LastLogIndex() {
-	//		// Append any new entries not already in the log
-	//		n.StoreLog(leaderLog)
-	//	} else if n.GetLog(leaderLog.GetIndex()) == nil || (leaderLog.GetTermId() != n.GetLog(leaderLog.GetIndex()).GetTermId()) {
-	//		// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
-	//		n.TruncateLog(leaderLog.GetIndex())
-	//		// Append any new entries not already in the log
-	//		n.StoreLog(leaderLog)
-	//	}
-	//}
-	//n.LeaderMutex.Unlock()
-	//if request.GetLeaderCommit() > n.CommitIndex.Load() {
-	//	n.CommitIndex.Store(uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex()))))
-	//	for n.CommitIndex.Load() > n.LastApplied.Load() {
-	//		n.LastApplied.Add(1)
-	//		n.processLogEntry(n.LastApplied.Load())
-	//	}
-	//}
-	//reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: true}
-	//return true, true
 }
