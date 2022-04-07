@@ -97,8 +97,6 @@ func (n *Node) doLeader() stateFunction {
 				if exists {
 					reply <- *cacheReply
 				} else {
-					n.LeaderMutex.Lock()
-					n.requestsMutex.Lock()
 
 					requestEntry := LogEntry{
 						Index:   n.LastLogIndex() + 1,
@@ -108,18 +106,13 @@ func (n *Node) doLeader() stateFunction {
 						Data:    request.GetData(),
 						CacheId: cacheId,
 					}
-
+					n.requestsMutex.Lock()
 					n.requestsByCacheID[cacheId] = append(n.requestsByCacheID[cacheId], reply)
-
-					n.StoreLog(&requestEntry)
-
 					n.requestsMutex.Unlock()
-					n.LeaderMutex.Unlock()
 
-					fallback := n.sendHeartbeats()
-					if fallback {
-						return n.doFollower
-					}
+					n.LeaderMutex.Lock()
+					n.StoreLog(&requestEntry)
+					n.LeaderMutex.Unlock()
 				}
 			}
 

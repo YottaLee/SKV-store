@@ -92,12 +92,15 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: false}
 		return false, false
 	}
-
-	n.Leader = request.Leader
+	fallback = true
+	if n.Leader == nil || (n.Leader.Id != request.Leader.Id) {
+		n.Leader = request.Leader
+	}
 	if n.GetCurrentTerm() < request.GetTerm() {
 		n.SetCurrentTerm(request.GetTerm())
 		n.setVotedFor("")
 	}
+	resetTimeout = true
 	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
 	if request.PrevLogIndex > 0 && (n.GetLog(request.PrevLogIndex) == nil || n.GetLog(request.PrevLogIndex).GetTermId() != request.GetPrevLogTerm()) {
 		reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: false}
@@ -105,18 +108,24 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	}
 	// Found a log entry whose term and index are matched with prevLogIndex and preLogTerm
 	n.LeaderMutex.Lock()
-	for _, leaderLog := range request.GetEntries() {
-		if leaderLog.GetIndex() > n.LastLogIndex() {
-			// Append any new entries not already in the log
-			n.StoreLog(leaderLog)
-		} else if n.GetLog(leaderLog.GetIndex()) == nil || (leaderLog.GetTermId() != n.GetLog(leaderLog.GetIndex()).GetTermId()) {
-			// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
-			n.TruncateLog(leaderLog.GetIndex())
-			// Append any new entries not already in the log
-			n.StoreLog(leaderLog)
+	if len(request.Entries) > 0 {
+		newFirstEntry := request.Entries[0]
+		ourLastEntry := n.GetLog(n.LastLogIndex())
+		if (ourLastEntry.Index >= newFirstEntry.Index) ||
+			((ourLastEntry.Index == newFirstEntry.Index) && (ourLastEntry.TermId != newFirstEntry.TermId)) {
+			n.TruncateLog(newFirstEntry.GetIndex())
+		}
+
+		if n.LastLogIndex()+1 != newFirstEntry.GetIndex() {
+			panic("truncation not work")
+		}
+
+		for _, entry := range request.Entries {
+			n.StoreLog(entry)
 		}
 	}
 	n.LeaderMutex.Unlock()
+
 	if request.GetLeaderCommit() > n.CommitIndex.Load() {
 		n.CommitIndex.Store(uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex()))))
 		for n.CommitIndex.Load() > n.LastApplied.Load() {
@@ -126,4 +135,27 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 	}
 	reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: true}
 	return true, true
+	//n.LeaderMutex.Lock()
+	//for _, leaderLog := range request.GetEntries() {
+	//
+	//	if leaderLog.GetIndex() > n.LastLogIndex() {
+	//		// Append any new entries not already in the log
+	//		n.StoreLog(leaderLog)
+	//	} else if n.GetLog(leaderLog.GetIndex()) == nil || (leaderLog.GetTermId() != n.GetLog(leaderLog.GetIndex()).GetTermId()) {
+	//		// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
+	//		n.TruncateLog(leaderLog.GetIndex())
+	//		// Append any new entries not already in the log
+	//		n.StoreLog(leaderLog)
+	//	}
+	//}
+	//n.LeaderMutex.Unlock()
+	//if request.GetLeaderCommit() > n.CommitIndex.Load() {
+	//	n.CommitIndex.Store(uint64(math.Min(float64(request.GetLeaderCommit()), float64(n.LastLogIndex()))))
+	//	for n.CommitIndex.Load() > n.LastApplied.Load() {
+	//		n.LastApplied.Add(1)
+	//		n.processLogEntry(n.LastApplied.Load())
+	//	}
+	//}
+	//reply <- AppendEntriesReply{Term: n.GetCurrentTerm(), Success: true}
+	//return true, true
 }
