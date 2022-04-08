@@ -219,7 +219,7 @@ func (n *Node) sendHeartbeats() (fallback bool) {
 						n.checkForCommit()
 						n.LeaderMutex.Unlock()
 						return
-					} else if nxtInd <= 1 {
+					} else if nxtInd < 1 {
 						// can't go back anymore!!
 						n.Error("AppendEntriesRPC to %v failed consistency check at 0", p.Id)
 						return
@@ -227,6 +227,7 @@ func (n *Node) sendHeartbeats() (fallback bool) {
 						n.LeaderMutex.Lock()
 						n.nextIndex[p.Id] = nxtInd - 1
 						n.LeaderMutex.Unlock()
+						return
 					}
 
 				}
