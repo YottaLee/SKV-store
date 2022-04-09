@@ -2,8 +2,11 @@ package test
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
+	"google.golang.org/grpc/grpclog"
 	"io/ioutil"
+	raft "raft/pkg"
 	"time"
 )
 
@@ -79,4 +82,13 @@ func cleanupCluster(nodes []*raft.Node) {
 		}(node)
 	}
 	time.Sleep(5 * time.Second)
+}
+
+func findFollower(nodes []*raft.Node) *raft.Node {
+	for _, node := range nodes {
+		if node.GetState() == raft.FollowerState {
+			return node
+		}
+	}
+	panic("Couldn't find any followers in findFollower!")
 }
