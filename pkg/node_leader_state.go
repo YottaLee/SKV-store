@@ -61,7 +61,7 @@ func (n *Node) doLeader() stateFunction {
 		case msg := <-n.clientRequest:
 			request := msg.request
 			reply := msg.reply
-			if request.SequenceNum == 0 {
+			if request.ClientId == 0 {
 				// TODO registerRequest
 				n.LeaderMutex.Lock()
 				logEntry := &LogEntry{
