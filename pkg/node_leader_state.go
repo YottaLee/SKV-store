@@ -15,10 +15,6 @@ func (n *Node) doLeader() stateFunction {
 	// Hint: perform any initial work, and then consider what a node in the
 	// leader state should do when it receives an incoming message on every
 	// possible channel.
-	if n.GetVotedFor() != n.Self.Id {
-		panic("Leader should voted for itself")
-	}
-
 	n.Leader = n.Self
 
 	n.LeaderMutex.Lock()
@@ -218,10 +214,6 @@ func (n *Node) sendHeartbeats() (fallback bool) {
 						n.matchIndex[p.Id] = lastInd
 						n.checkForCommit()
 						n.LeaderMutex.Unlock()
-						return
-					} else if nxtInd < 1 {
-						// can't go back anymore!!
-						n.Error("AppendEntriesRPC to %v failed consistency check at 0", p.Id)
 						return
 					} else {
 						n.LeaderMutex.Lock()

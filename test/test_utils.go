@@ -92,3 +92,8 @@ func findFollower(nodes []*raft.Node) *raft.Node {
 	}
 	panic("Couldn't find any followers in findFollower!")
 }
+
+const (
+	WAIT_PERIOD         = 6
+	CONCURRENT_REQUESTS = 5
+)
