@@ -132,49 +132,6 @@ func TestClientInteraction_OldleaderFallBack(t *testing.T) {
 	}
 }
 
-//the client registers itself to a caldidate, and the raft should return a hint to the
-//client that this node is not a leader.
-func TestClientInteraction_Candidate(t *testing.T) {
-	// Out.Println("TestClientInteraction_Candidate start")
-	suppressLoggers()
-	config := raft.DefaultConfig()
-	config.ClusterSize = 7
-	cluster, _ := raft.CreateLocalCluster(config)
-	defer cleanupCluster(cluster)
-
-	time.Sleep(3 * time.Second)
-
-	_, err := findLeader(cluster)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, node := range cluster {
-		if node.GetState() == raft.CandidateState {
-			fmt.Println("find the candidate!")
-			reply, _ := node.Self.RegisterClientRPC()
-			fmt.Printf("reply request: %v\n", reply.Status)
-			if reply.Status != raft.ClientStatus_NOT_LEADER && reply.Status != raft.ClientStatus_ELECTION_IN_PROGRESS {
-				t.Error(reply.Status)
-				t.Fatal("Wrong response when registering a client to a candidate")
-			}
-
-			req := raft.ClientRequest{
-				ClientId:        1,
-				SequenceNum:     1,
-				StateMachineCmd: hashmachine.HashChainInit,
-				Data:            []byte("hello"),
-			}
-			clientResult, _ := node.Self.ClientRequestRPC(&req)
-			fmt.Printf("client request1: %v\n", clientResult.Status)
-			if clientResult.Status != raft.ClientStatus_NOT_LEADER && clientResult.Status != raft.ClientStatus_ELECTION_IN_PROGRESS {
-				t.Fatal("Wrong response when sending a client request to a candidate")
-			}
-			break
-		}
-	}
-}
-
 // Test leaders can register the client and process duplicate request from clients properly
 func TestClientInteraction_Leader_DuplicateRequest(t *testing.T) {
 	suppressLoggers()
@@ -294,6 +251,108 @@ func TestHandleHeartbeat_Follower(t *testing.T) {
 		t.Fatal("Should've denied vote")
 	}
 
+}
+
+//the client registers itself to a caldidate, and the raft should return a hint to the client that this node is not a leader.
+func TestClientInteraction_Candidate(t *testing.T) {
+	// Out.Println("TestClientInteraction_Candidate start")
+	suppressLoggers()
+	config := raft.DefaultConfig()
+	config.ClusterSize = 7
+	cluster, _ := raft.CreateLocalCluster(config)
+	defer cleanupCluster(cluster)
+
+	time.Sleep(3 * time.Second)
+
+	_, err := findLeader(cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, node := range cluster {
+		if node.GetState() == raft.CandidateState {
+			fmt.Println("find the candidate!")
+			reply, _ := node.Self.RegisterClientRPC()
+			fmt.Printf("reply request: %v\n", reply.Status)
+			if reply.Status != raft.ClientStatus_NOT_LEADER && reply.Status != raft.ClientStatus_ELECTION_IN_PROGRESS {
+				t.Error(reply.Status)
+				t.Fatal("Wrong response when registering a client to a candidate")
+			}
+
+			req := raft.ClientRequest{
+				ClientId:        1,
+				SequenceNum:     1,
+				StateMachineCmd: hashmachine.HashChainInit,
+				Data:            []byte("hello"),
+			}
+			clientResult, _ := node.Self.ClientRequestRPC(&req)
+			fmt.Printf("client request1: %v\n", clientResult.Status)
+			if clientResult.Status != raft.ClientStatus_NOT_LEADER && clientResult.Status != raft.ClientStatus_ELECTION_IN_PROGRESS {
+				t.Fatal("Wrong response when sending a client request to a candidate")
+			}
+			break
+		}
+	}
+}
+
+func TestClientInteraction_Candidate_ClientRequest(t *testing.T) {
+	suppressLoggers()
+	nodes, err := createTestCluster([]int{5001, 5002, 5003, 5004, 5005})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Shutdown all nodes once finished
+	defer cleanupCluster(nodes)
+	time.Sleep(time.Second * WaitPeriod) // Long enough for timeout+election
+
+	// Partition off leader
+	leader, err := findLeader(nodes)
+	if err != nil {
+		t.Errorf("Failed to find leader: %v", err)
+		return
+	}
+	leaderTerm := leader.GetCurrentTerm()
+	leader.NetworkPolicy.PauseWorld(true)
+
+	time.Sleep(time.Second * 2) // Wait, just in case the partitioned leader attempts anything
+
+	// Partition off follower
+	follower := findFollower(nodes)
+	follower.NetworkPolicy.PauseWorld(true)
+
+	// Test: Make sure that the original leader remains a leader post-partition
+	if leader.GetState() != raft.LeaderState {
+		t.Errorf("Leader should remain leader even when partitioned off")
+		return
+	}
+
+	pausedLeaderTerm := leader.GetCurrentTerm()
+
+	if leaderTerm != pausedLeaderTerm {
+		t.Errorf("Leader's term should remain the same after partition. Went from %v to %v", leaderTerm, pausedLeaderTerm)
+		return
+	}
+
+	time.Sleep(time.Second * WaitPeriod) // Finish waiting for rest of cluster to elect a new leader
+
+	// Test: Make sure partitioned follower has transitioned to candidate state and has increased term
+	if follower.GetState() != raft.CandidateState {
+		t.Errorf("Partitioned follower has not transitioned to candidate after %v seconds", WaitPeriod)
+	}
+
+	clientid := 0
+	// Hash initialization request
+	initReq := raft.ClientRequest{
+		ClientId:        uint64(clientid),
+		SequenceNum:     1,
+		StateMachineCmd: hashmachine.HashChainInit,
+		Data:            []byte("hello"),
+	}
+	clientResult, _ := follower.ClientRequestCaller(context.Background(), &initReq)
+	if clientResult.Status != raft.ClientStatus_ELECTION_IN_PROGRESS {
+		t.Fatal("Wrong response when a client request to a candidate")
+	}
 }
 
 func TestClientInteractions(t *testing.T) {
