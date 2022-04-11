@@ -114,32 +114,22 @@ func (n *Node) handleAppendEntries(msg AppendEntriesMsg) (resetTimeout, fallback
 		}
 	} else {
 		n.LeaderMutex.Lock()
+		if len(request.Entries) > 0 {
+			firstEntry := request.Entries[0]
+			curLastEntry := n.GetLog(n.LastLogIndex())
+			if (curLastEntry.Index >= firstEntry.Index) ||
+				((curLastEntry.Index == firstEntry.Index) && (curLastEntry.TermId != firstEntry.TermId)) {
+				n.TruncateLog(firstEntry.Index)
+			}
 
-		for _, logEntry := range request.GetEntries() {
-			if logEntry.GetIndex() > n.LastLogIndex() {
-				n.StoreLog(logEntry)
-			} else if n.GetLog(logEntry.GetIndex()) == nil || (logEntry.GetTermId() != n.GetLog(logEntry.GetIndex()).GetTermId()) {
-				n.TruncateLog(logEntry.GetIndex())
-				n.StoreLog(logEntry)
+			if n.LastLogIndex()+1 != firstEntry.GetIndex() {
+				panic("error in appending log entry")
+			}
+
+			for _, entry := range request.Entries {
+				n.StoreLog(entry)
 			}
 		}
-
-		//if len(request.Entries) > 0 {
-		//	firstEntry := request.Entries[0]
-		//	curLastEntry := n.GetLog(n.LastLogIndex())
-		//	if (curLastEntry.Index >= firstEntry.Index) ||
-		//		((curLastEntry.Index == firstEntry.Index) && (curLastEntry.TermId != firstEntry.TermId)) {
-		//		n.TruncateLog(firstEntry.Index)
-		//	}
-		//
-		//	if n.LastLogIndex()+1 != firstEntry.GetIndex() {
-		//		panic("error in appending log entry")
-		//	}
-		//
-		//	for _, entry := range request.Entries {
-		//		n.StoreLog(entry)
-		//	}
-		//}
 		n.LeaderMutex.Unlock()
 
 		if request.LeaderCommit > n.CommitIndex.Load() {

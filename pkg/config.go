@@ -22,7 +22,7 @@ func DefaultConfig() Config {
 	return Config{
 		ClusterSize:      3,
 		ElectionTimeout:  time.Millisecond * 150,
-		HeartbeatTimeout: time.Millisecond * 50,
+		HeartbeatTimeout: time.Millisecond * 70,
 		NodeIDSize:       2,
 		LogPath:          os.TempDir(),
 		InMemory:         true,
