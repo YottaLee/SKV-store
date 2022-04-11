@@ -188,40 +188,8 @@ func TestClientInteraction_Leader_DuplicateRequest(t *testing.T) {
 	}
 }
 
-func TestClientInteraction_TwoNodeCluster(t *testing.T) {
-	suppressLoggers()
-	config := raft.DefaultConfig()
-	config.ClusterSize = 2
-	cluster, _ := raft.CreateLocalCluster(config)
-	defer cleanupCluster(cluster)
-
-	time.Sleep(2 * time.Second)
-	leader, err := findLeader(cluster)
-	if err != nil {
-		t.Errorf("cannot find leader")
-	}
-
-	// First make sure we can register a client correctly
-	clientid := 0
-
-	// Hash initialization request
-	initReq := raft.ClientRequest{
-		ClientId:        uint64(clientid),
-		SequenceNum:     1,
-		StateMachineCmd: hashmachine.HashChainInit,
-		Data:            []byte("hello"),
-	}
-	reply, _ := leader.ClientRequestCaller(context.Background(), &initReq)
-
-	if reply.Status != raft.ClientStatus_OK {
-		t.Errorf("%v", reply.Status)
-		t.Fatal("We don't have a leader yet")
-	}
-	logsMatch(leader, cluster)
-}
-
 // Handle RequestVote with Stale Term
-func TestHandleHeartbeat_Follower(t *testing.T) {
+func TestClientInteraction_Follower(t *testing.T) {
 	suppressLoggers()
 	config := raft.DefaultConfig()
 	cluster, err := raft.CreateLocalCluster(config)
