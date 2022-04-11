@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"google.golang.org/grpc/grpclog"
@@ -84,16 +85,26 @@ func cleanupCluster(nodes []*raft.Node) {
 	time.Sleep(5 * time.Second)
 }
 
-func findFollower(nodes []*raft.Node) *raft.Node {
+func findFollower(nodes []*raft.Node) (*raft.Node, error) {
 	for _, node := range nodes {
 		if node.GetState() == raft.FollowerState {
-			return node
+			return node, nil
 		}
 	}
-	panic("Couldn't find any followers in findFollower!")
+	err := errors.New("Couldn't find any followers in findFollower!")
+	return nil, err
 }
 
-const (
-	WAIT_PERIOD         = 6
-	CONCURRENT_REQUESTS = 5
-)
+func findAllFollowers(nodes []*raft.Node) ([]*raft.Node, error) {
+	followers := make([]*raft.Node, 0)
+	for _, node := range nodes {
+		if node.GetState() == raft.FollowerState {
+			followers = append(followers, node)
+		}
+	}
+
+	if len(followers) == 0 {
+		return nil, fmt.Errorf("No follower found in slice of nodes")
+	}
+	return followers, nil
+}

@@ -236,7 +236,7 @@ func TestHandleHeartbeat_Follower(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	follower := findFollower(cluster)
+	follower, _ := findFollower(cluster)
 
 	// make sure the client get the correct response while registering itself with a candidate
 	reply, _ := follower.AppendEntriesCaller(context.Background(), &raft.AppendEntriesRequest{
@@ -318,7 +318,7 @@ func TestClientInteraction_Candidate_ClientRequest(t *testing.T) {
 	time.Sleep(time.Second * 2) // Wait, just in case the partitioned leader attempts anything
 
 	// Partition off follower
-	follower := findFollower(nodes)
+	follower, _ := findFollower(nodes)
 	follower.NetworkPolicy.PauseWorld(true)
 
 	// Test: Make sure that the original leader remains a leader post-partition
@@ -376,7 +376,7 @@ func TestClientInteractions(t *testing.T) {
 
 	leaderRemoteNode := leader.Self
 
-	follower := findFollower(nodes)
+	follower, _ := findFollower(nodes)
 
 	// Test: Request to follower should return NOT_LEADER
 	// This clientId value registers a client for the first time.
