@@ -9,7 +9,7 @@
 
 - TestVote_Leader2
 
-  This test make sur  the leader would behave properly when handling RequestVote, especially when leader handle competing RequestVote with Higher Term and Out-of-date log
+  This test make sure the leader would behave properly when handling RequestVote, especially when leader handle competing RequestVote with Higher Term and Out-of-date log
 
 - TestVote_Leader3
 
