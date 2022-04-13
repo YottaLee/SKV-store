@@ -93,6 +93,6 @@
 
 **node_candidate_state.go: 96.3%**
 
-**node_follower_state.go: 95.7%**
+**node_follower_state.go: 98.6%**
 
 **node_leader_state.go: 90.8%**
