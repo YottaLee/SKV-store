@@ -143,15 +143,12 @@ func (n *Node) handleRequestVote(msg RequestVoteMsg) (fallback bool) {
 	// TODO: Students should implement this method
 	request := msg.request
 	reply := msg.reply
-	// If a server receives a request with a stale term number, it rejects the request (&5.1)
 	if n.GetCurrentTerm() >= request.GetTerm() {
 		reply <- RequestVoteReply{Term: n.GetCurrentTerm(), VoteGranted: false}
 		return false
 	}
 	n.SetCurrentTerm(request.GetTerm())
-	// If follower and candidate are in different term. Reset the follower's vote for
 	n.setVotedFor("")
-	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 	lastTerm := n.GetLog(n.LastLogIndex()).GetTermId()
 	if lastTerm < request.GetLastLogTerm() ||
 		(lastTerm == request.GetLastLogTerm() && n.LastLogIndex() <= request.GetLastLogIndex()) {

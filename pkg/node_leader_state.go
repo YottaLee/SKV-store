@@ -193,15 +193,11 @@ func (n *Node) sendHeartbeats() (fallback bool) {
 					reply, err := p.AppendEntriesRPC(n, req)
 
 					if err != nil {
-						if err.Error() != "the network policy has forbid this communication" {
-							n.Out("AppendEntriesRPC to %v failed with %v", p.Id, err)
-						}
 						return
 					}
 
 					success = reply.Success
 					if reply.Term > currTerm {
-						n.Out("falling back due to %v, from request %v", reply, req)
 						n.SetCurrentTerm(reply.Term)
 						n.setVotedFor("")
 						fallbackCh <- true
