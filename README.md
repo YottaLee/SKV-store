@@ -1,6 +1,8 @@
 # Raft
 
-my_election_test.go
+### Test For Raft
+
+#### **my_election_test.go**
 
 - TestVote_Leader1
   This test make sure the leader would behave properly when handling RequestVote, especially when leader handle competing RequestVote with stale term.
@@ -31,7 +33,7 @@ my_election_test.go
 
 
 
-my_client_test.go
+#### **my_client_test.go**
 
 - TestClientInteraction_Oldleader
 
@@ -63,7 +65,7 @@ my_client_test.go
 
 
 
-my_partition_test.go
+#### **my_partition_test.go**
 
 - TestThreeWayPartition221
 
@@ -79,6 +81,18 @@ my_partition_test.go
 
 
 
-my_append_entry_test.go
+#### **my_append_entry_test.go**
 
-- This test make sure the follower would behave properly when handling AppendEntriesRequest with PrevLogIndex and PrevLogTerm not matching
+- TestAppendEntriesLogTerm 
+
+   This test make sure the follower would behave properly when handling AppendEntriesRequest with PrevLogIndex and PrevLogTerm not matching
+
+
+
+### Test Coverage
+
+**node_candidate_state.go: 96.3%**
+
+**node_follower_state.go: 95.7%**
+
+**node_leader_state.go: 90.8%**
