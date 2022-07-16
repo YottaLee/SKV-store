@@ -1,10 +1,14 @@
 # Raft
 
+### Introduction
+Raft is a consensus protocol that was designed with the primary goal of understandability without compromising on correctness or performance. Raft offers a generic way to distribute a state machine across a cluster of computing systems, ensuring that each node in the cluster agrees upon the same series of state transitions.
+
 ### Test For Raft
 
 #### **my_election_test.go**
 
 - TestVote_Leader1
+
   This test make sure the leader would behave properly when handling RequestVote, especially when leader handle competing RequestVote with stale term.
 
 - TestVote_Leader2
